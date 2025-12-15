@@ -1,5 +1,5 @@
 # ----------------------------------------------------------
-# MedIntel – A Medical Intelligence System (FINAL & FIXED)
+# MedIntel – A Medical Intelligence System (ALL-IN-ONE FINAL)
 # ----------------------------------------------------------
 
 import sqlite3
@@ -9,7 +9,6 @@ from sentence_transformers import SentenceTransformer, util
 import streamlit as st
 from fpdf import FPDF
 from specialty_keywords import specialties_keywords
-import pydeck as pdk
 import os
 
 # -----------------------
@@ -18,13 +17,13 @@ import os
 DB_FILE = "medintel.db"
 
 # -----------------------
-# Safety DB Creator (only if DB missing)
+# Database Creator
 # -----------------------
 def create_database():
     conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
+    cur = conn.cursor()
 
-    cursor.execute("""
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS patients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
@@ -32,6 +31,57 @@ def create_database():
         city TEXT,
         language TEXT,
         history TEXT
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS doctors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        specialty TEXT,
+        city TEXT,
+        languages TEXT,
+        experience INTEGER,
+        rating REAL,
+        bio TEXT,
+        latitude REAL,
+        longitude REAL
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS visits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        patient_id INTEGER,
+        doctor_id INTEGER,
+        symptoms TEXT,
+        predicted_specialty TEXT,
+        matched_score REAL,
+        visit_date TEXT
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS appointments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        patient_id INTEGER,
+        doctor_id INTEGER,
+        date TEXT,
+        time TEXT,
+        notes TEXT,
+        status TEXT
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS feedback (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        visit_id INTEGER,
+        doctor_id INTEGER,
+        patient_id INTEGER,
+        rating INTEGER,
+        comments TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
     """)
 
@@ -62,7 +112,7 @@ def load_model():
 MODEL = load_model()
 
 # -----------------------
-# Database Helper
+# DB Helper
 # -----------------------
 def get_conn():
     return sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -70,13 +120,14 @@ def get_conn():
 # -----------------------
 # Load Doctors
 # -----------------------
-@st.cache_data(ttl=3600)
+@st.cache_data
 def load_doctors():
     conn = get_conn()
-    try:
-        df = pd.read_sql_query("SELECT * FROM doctors", conn)
-    finally:
-        conn.close()
+    df = pd.read_sql_query("SELECT * FROM doctors", conn)
+    conn.close()
+
+    if df.empty:
+        return df
 
     df["doc_text"] = (
         df["specialty"].fillna("") + " " +
@@ -89,18 +140,15 @@ def load_doctors():
 
 doctors_df = load_doctors()
 
-@st.cache_data(ttl=3600)
-def compute_embeddings(texts):
-    return MODEL.encode(texts, convert_to_tensor=True)
-
-doctor_embeddings = compute_embeddings(doctors_df["doc_text"].tolist())
+if not doctors_df.empty:
+    doctor_embeddings = MODEL.encode(
+        doctors_df["doc_text"].tolist(),
+        convert_to_tensor=True
+    )
 
 # -----------------------
 # Utility Functions
 # -----------------------
-def normalize_text(s):
-    return str(s).lower().strip() if s else ""
-
 def detect_specialty(symptoms):
     if not symptoms:
         return "General Physician"
@@ -118,14 +166,11 @@ def detect_specialty(symptoms):
 
     return best_spec
 
-# -----------------------
-# Insert Helpers
-# -----------------------
 def insert_patient(name, age, city, language):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO patients (name, age, city, language, history) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO patients VALUES (NULL, ?, ?, ?, ?, ?)",
         (name, age, city, language, "[]")
     )
     conn.commit()
@@ -133,13 +178,13 @@ def insert_patient(name, age, city, language):
     conn.close()
     return pid
 
-def insert_visit(patient_id, doctor_id, symptoms, specialty, score):
+def insert_visit(pid, did, symptoms, specialty, score):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO visits (patient_id, doctor_id, symptoms, predicted_specialty, matched_score, visit_date)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (patient_id, doctor_id, symptoms, specialty, score, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        INSERT INTO visits VALUES (NULL, ?, ?, ?, ?, ?, ?)
+    """, (pid, did, symptoms, specialty, score,
+          datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
     vid = cur.lastrowid
     conn.close()
@@ -149,19 +194,17 @@ def insert_appointment(pid, did, date_str, time_str, notes):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO appointments (patient_id, doctor_id, date, time, notes, status)
-        VALUES (?, ?, ?, ?, ?, 'Scheduled')
+        INSERT INTO appointments VALUES (NULL, ?, ?, ?, ?, ?, 'Scheduled')
     """, (pid, did, date_str, time_str, notes))
     conn.commit()
     conn.close()
 
-def insert_feedback(visit_id, doctor_id, patient_id, rating, comments):
+def insert_feedback(vid, did, pid, rating, comments):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO feedback (visit_id, doctor_id, patient_id, rating, comments)
-        VALUES (?, ?, ?, ?, ?)
-    """, (visit_id, doctor_id, patient_id, rating, comments))
+        INSERT INTO feedback VALUES (NULL, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    """, (vid, did, pid, rating, comments))
     conn.commit()
     conn.close()
 
@@ -176,33 +219,32 @@ def generate_pdf(patient, doctor, symptoms, specialty):
     pdf.ln(8)
 
     pdf.set_font("Arial", "", 12)
-    pdf.multi_cell(0, 7, f"Patient Name: {patient['name']}")
-    pdf.multi_cell(0, 7, f"Age: {patient['age']}")
-    pdf.multi_cell(0, 7, f"City: {patient['city']}")
-    pdf.multi_cell(0, 7, f"Language: {patient['language']}")
-    pdf.ln(4)
+    for k, v in patient.items():
+        pdf.multi_cell(0, 7, f"{k.capitalize()}: {v}")
 
+    pdf.ln(4)
     pdf.multi_cell(0, 7, f"Symptoms: {symptoms}")
     pdf.multi_cell(0, 7, f"Predicted Specialty: {specialty}")
     pdf.ln(4)
 
-    pdf.multi_cell(0, 7, f"Doctor: {doctor['name']} ({doctor['specialty']})")
+    pdf.multi_cell(0, 7, f"Doctor: {doctor['name']}")
+    pdf.multi_cell(0, 7, f"Specialty: {doctor['specialty']}")
     pdf.multi_cell(0, 7, f"Experience: {doctor['experience']} years")
-    pdf.multi_cell(0, 7, f"Rating: {doctor['rating']}/5")
+    pdf.multi_cell(0, 7, f"Rating: {doctor['rating']}")
 
     return pdf.output(dest="S").encode("latin-1")
 
 # -----------------------
 # Session State
 # -----------------------
-if "last_pdf" not in st.session_state:
-    st.session_state.last_pdf = None
-    st.session_state.last_pdf_name = None
+st.session_state.setdefault("pdf", None)
+st.session_state.setdefault("pdf_name", None)
+st.session_state.setdefault("patient_id", None)
 
 # -----------------------
 # Patient Portal
 # -----------------------
-st.subheader("Patient Portal")
+st.subheader("👤 Patient Portal")
 
 with st.form("patient_form"):
     name = st.text_input("Patient Name")
@@ -213,50 +255,62 @@ with st.form("patient_form"):
     severity = st.slider("Severity (1–5)", 1, 5, 3)
     submit = st.form_submit_button("Find Doctors")
 
-if submit:
+# -----------------------
+# Doctor Matching
+# -----------------------
+if submit and not doctors_df.empty:
     conn = get_conn()
-    patient_df = pd.read_sql_query(
-        "SELECT * FROM patients WHERE name = ?", conn, params=(name,)
-    )
+    dfp = pd.read_sql_query(
+        "SELECT * FROM patients WHERE name = ?", conn, params=(name,))
     conn.close()
 
-    if patient_df.empty:
-        patient_id = insert_patient(name, age, city, language)
+    if dfp.empty:
+        pid = insert_patient(name, age, city, language)
     else:
-        patient_id = int(patient_df.iloc[0]["id"])
+        pid = int(dfp.iloc[0]["id"])
+
+    st.session_state.patient_id = pid
 
     specialty = detect_specialty(symptoms)
-    st.info(f"Detected Specialty: **{specialty}**")
+    st.success(f"Detected Specialty: {specialty}")
 
-    query_text = f"{specialty} {city} {language} {symptoms}".lower()
-    q_emb = MODEL.encode(query_text, convert_to_tensor=True)
-    scores = util.cos_sim(q_emb, doctor_embeddings)[0].cpu().numpy()
+    query = MODEL.encode(
+        f"{specialty} {city} {language} {symptoms}".lower(),
+        convert_to_tensor=True
+    )
+
+    scores = util.cos_sim(query, doctor_embeddings)[0].cpu().numpy()
 
     results = []
-    for i, score in enumerate(scores):
+    for i, s in enumerate(scores):
         doc = doctors_df.iloc[i]
-        final_score = min(float(score) + severity * 0.02, 1.0)
-
-        results.append({
-            "id": int(doc["id"]),
-            "name": doc["name"],
-            "specialty": doc["specialty"],
-            "city": doc["city"],
-            "experience": doc["experience"],
-            "rating": doc["rating"],
-            "score": final_score,
-            "latitude": doc["latitude"],
-            "longitude": doc["longitude"]
-        })
+        final_score = min(float(s) + severity * 0.02, 1.0)
+        results.append({**doc, "score": final_score})
 
     results = sorted(results, key=lambda x: x["score"], reverse=True)[:5]
 
-    st.subheader("Top Doctor Matches")
+    st.subheader("🏥 Top Doctor Matches")
+
     for r in results:
-        st.markdown(
-            f"### {r['name']} ({r['specialty']}) — Score {r['score']:.3f}"
-        )
-        insert_visit(patient_id, r["id"], symptoms, specialty, r["score"])
+        st.markdown(f"### {r['name']} ({r['specialty']}) — {r['score']:.3f}")
+        visit_id = insert_visit(pid, r["id"], symptoms, specialty, r["score"])
+
+        with st.expander("📅 Book Appointment"):
+            ap_date = st.date_input("Date", min_value=date.today(), key=f"d{r['id']}")
+            ap_time = st.time_input("Time", key=f"t{r['id']}")
+            notes = st.text_area("Notes", key=f"n{r['id']}")
+
+            if st.button("Confirm", key=f"b{r['id']}"):
+                insert_appointment(pid, r["id"], ap_date, ap_time, notes)
+                st.success("Appointment Booked")
+
+        with st.expander("⭐ Give Feedback"):
+            rating = st.slider("Rating", 1, 5, 4, key=f"r{r['id']}")
+            comment = st.text_area("Comment", key=f"c{r['id']}")
+
+            if st.button("Submit Feedback", key=f"f{r['id']}"):
+                insert_feedback(visit_id, r["id"], pid, rating, comment)
+                st.success("Feedback Submitted")
 
     pdf = generate_pdf(
         {"name": name, "age": age, "city": city, "language": language},
@@ -265,16 +319,37 @@ if submit:
         specialty
     )
 
-    st.session_state.last_pdf = pdf
-    st.session_state.last_pdf_name = f"Medical_Report_{name}.pdf"
+    st.session_state.pdf = pdf
+    st.session_state.pdf_name = f"Medical_Report_{name}.pdf"
 
 # -----------------------
-# PDF Download
+# Download PDF
 # -----------------------
-if st.session_state.last_pdf:
+if st.session_state.pdf:
     st.download_button(
         "📄 Download Medical Report",
-        st.session_state.last_pdf,
-        file_name=st.session_state.last_pdf_name,
+        st.session_state.pdf,
+        file_name=st.session_state.pdf_name,
         mime="application/pdf"
     )
+
+# -----------------------
+# Appointments View
+# -----------------------
+if st.session_state.patient_id:
+    st.subheader("📋 My Appointments")
+
+    conn = get_conn()
+    appts = pd.read_sql_query("""
+    SELECT a.date, a.time, a.status, d.name, d.specialty
+    FROM appointments a
+    JOIN doctors d ON a.doctor_id = d.id
+    WHERE a.patient_id = ?
+    ORDER BY a.date
+    """, conn, params=(st.session_state.patient_id,))
+    conn.close()
+
+    if appts.empty:
+        st.info("No appointments yet.")
+    else:
+        st.dataframe(appts, use_container_width=True)
