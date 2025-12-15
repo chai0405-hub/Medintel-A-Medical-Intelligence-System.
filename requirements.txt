@@ -2,3 +2,6 @@ streamlit
 pandas
 sentence-transformers
 torch
+scikit-learn
+fpdf
+pydeck
