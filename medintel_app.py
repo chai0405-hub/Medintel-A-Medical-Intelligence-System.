@@ -100,7 +100,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("MedIntel – A Medical Intelligence System 🩺")
+st.title("🩺 MedIntel – A Medical Intelligence System")
 
 # -----------------------
 # Load AI Model
@@ -126,15 +126,13 @@ def load_doctors():
     df = pd.read_sql_query("SELECT * FROM doctors", conn)
     conn.close()
 
-    if df.empty:
-        return df
-
-    df["doc_text"] = (
-        df["specialty"].fillna("") + " " +
-        df["languages"].fillna("") + " " +
-        df["bio"].fillna("") + " " +
-        df["city"].fillna("")
-    ).str.lower()
+    if not df.empty:
+        df["doc_text"] = (
+            df["specialty"].fillna("") + " " +
+            df["languages"].fillna("") + " " +
+            df["bio"].fillna("") + " " +
+            df["city"].fillna("")
+        ).str.lower()
 
     return df
 
@@ -150,9 +148,6 @@ if not doctors_df.empty:
 # Utility Functions
 # -----------------------
 def detect_specialty(symptoms):
-    if not symptoms:
-        return "General Physician"
-
     symptom_emb = MODEL.encode(symptoms.lower(), convert_to_tensor=True)
     best_score = -1
     best_spec = "General Physician"
@@ -169,10 +164,9 @@ def detect_specialty(symptoms):
 def insert_patient(name, age, city, language):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO patients VALUES (NULL, ?, ?, ?, ?, ?)",
-        (name, age, city, language, "[]")
-    )
+    cur.execute("""
+        INSERT INTO patients VALUES (NULL, ?, ?, ?, ?, ?)
+    """, (name, age, city, language, "[]"))
     conn.commit()
     pid = cur.lastrowid
     conn.close()
@@ -190,12 +184,12 @@ def insert_visit(pid, did, symptoms, specialty, score):
     conn.close()
     return vid
 
-def insert_appointment(pid, did, date_str, time_str, notes):
+def insert_appointment(pid, did, d, t, notes):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO appointments VALUES (NULL, ?, ?, ?, ?, ?, 'Scheduled')
-    """, (pid, did, date_str, time_str, notes))
+    """, (pid, did, str(d), str(t), notes))
     conn.commit()
     conn.close()
 
@@ -256,7 +250,7 @@ with st.form("patient_form"):
     submit = st.form_submit_button("Find Doctors")
 
 # -----------------------
-# Doctor Matching
+# Doctor Matching + Booking
 # -----------------------
 if submit and not doctors_df.empty:
     conn = get_conn()
@@ -264,28 +258,23 @@ if submit and not doctors_df.empty:
         "SELECT * FROM patients WHERE name = ?", conn, params=(name,))
     conn.close()
 
-    if dfp.empty:
-        pid = insert_patient(name, age, city, language)
-    else:
-        pid = int(dfp.iloc[0]["id"])
-
+    pid = insert_patient(name, age, city, language) if dfp.empty else int(dfp.iloc[0]["id"])
     st.session_state.patient_id = pid
 
     specialty = detect_specialty(symptoms)
     st.success(f"Detected Specialty: {specialty}")
 
-    query = MODEL.encode(
+    query_emb = MODEL.encode(
         f"{specialty} {city} {language} {symptoms}".lower(),
         convert_to_tensor=True
     )
 
-    scores = util.cos_sim(query, doctor_embeddings)[0].cpu().numpy()
+    scores = util.cos_sim(query_emb, doctor_embeddings)[0].cpu().numpy()
 
     results = []
     for i, s in enumerate(scores):
         doc = doctors_df.iloc[i]
-        final_score = min(float(s) + severity * 0.02, 1.0)
-        results.append({**doc, "score": final_score})
+        results.append({**doc, "score": min(float(s) + severity * 0.02, 1.0)})
 
     results = sorted(results, key=lambda x: x["score"], reverse=True)[:5]
 
@@ -296,30 +285,28 @@ if submit and not doctors_df.empty:
         visit_id = insert_visit(pid, r["id"], symptoms, specialty, r["score"])
 
         with st.expander("📅 Book Appointment"):
-            ap_date = st.date_input("Date", min_value=date.today(), key=f"d{r['id']}")
-            ap_time = st.time_input("Time", key=f"t{r['id']}")
-            notes = st.text_area("Notes", key=f"n{r['id']}")
-
-            if st.button("Confirm", key=f"b{r['id']}"):
-                insert_appointment(pid, r["id"], ap_date, ap_time, notes)
-                st.success("Appointment Booked")
+            d = st.date_input("Date", min_value=date.today(), key=f"d{r['id']}")
+            t = st.time_input("Time", key=f"t{r['id']}")
+            notes = st.text_area(
+                "Notes",
+                "Experiencing headache, fever and dry cough for the past few days.",
+                key=f"n{r['id']}"
+            )
+            if st.button("Confirm Appointment", key=f"b{r['id']}"):
+                insert_appointment(pid, r["id"], d, t, notes)
+                st.success("✅ Appointment Booked")
 
         with st.expander("⭐ Give Feedback"):
             rating = st.slider("Rating", 1, 5, 4, key=f"r{r['id']}")
             comment = st.text_area("Comment", key=f"c{r['id']}")
-
             if st.button("Submit Feedback", key=f"f{r['id']}"):
                 insert_feedback(visit_id, r["id"], pid, rating, comment)
                 st.success("Feedback Submitted")
 
-    pdf = generate_pdf(
+    st.session_state.pdf = generate_pdf(
         {"name": name, "age": age, "city": city, "language": language},
-        results[0],
-        symptoms,
-        specialty
+        results[0], symptoms, specialty
     )
-
-    st.session_state.pdf = pdf
     st.session_state.pdf_name = f"Medical_Report_{name}.pdf"
 
 # -----------------------
@@ -334,18 +321,19 @@ if st.session_state.pdf:
     )
 
 # -----------------------
-# Appointments View
+# My Appointments
 # -----------------------
 if st.session_state.patient_id:
     st.subheader("📋 My Appointments")
 
     conn = get_conn()
     appts = pd.read_sql_query("""
-    SELECT a.date, a.time, a.status, d.name, d.specialty
-    FROM appointments a
-    JOIN doctors d ON a.doctor_id = d.id
-    WHERE a.patient_id = ?
-    ORDER BY a.date
+        SELECT a.date, a.time, a.status, a.notes,
+               d.name AS doctor, d.specialty
+        FROM appointments a
+        JOIN doctors d ON a.doctor_id = d.id
+        WHERE a.patient_id = ?
+        ORDER BY a.date
     """, conn, params=(st.session_state.patient_id,))
     conn.close()
 
