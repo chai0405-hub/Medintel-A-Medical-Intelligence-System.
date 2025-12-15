@@ -1,5 +1,5 @@
 # ----------------------------------------------------------
-# MedIntel – A Medical Intelligence System (ALL-IN-ONE FINAL)
+# MedIntel – A Medical Intelligence System (ALL-IN-ONE FINAL FIXED)
 # ----------------------------------------------------------
 
 import sqlite3
@@ -133,7 +133,6 @@ def load_doctors():
             df["bio"].fillna("") + " " +
             df["city"].fillna("")
         ).str.lower()
-
     return df
 
 doctors_df = load_doctors()
@@ -149,24 +148,21 @@ if not doctors_df.empty:
 # -----------------------
 def detect_specialty(symptoms):
     symptom_emb = MODEL.encode(symptoms.lower(), convert_to_tensor=True)
-    best_score = -1
-    best_spec = "General Physician"
+    best_score, best_spec = -1, "General Physician"
 
     for spec, keywords in specialties_keywords.items():
         spec_emb = MODEL.encode(" ".join(keywords), convert_to_tensor=True)
         score = util.cos_sim(symptom_emb, spec_emb).item()
         if score > best_score:
-            best_score = score
-            best_spec = spec
+            best_score, best_spec = score, spec
 
     return best_spec
 
 def insert_patient(name, age, city, language):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO patients VALUES (NULL, ?, ?, ?, ?, ?)
-    """, (name, age, city, language, "[]"))
+    cur.execute("INSERT INTO patients VALUES (NULL, ?, ?, ?, ?, ?)",
+                (name, age, city, language, "[]"))
     conn.commit()
     pid = cur.lastrowid
     conn.close()
@@ -175,10 +171,9 @@ def insert_patient(name, age, city, language):
 def insert_visit(pid, did, symptoms, specialty, score):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO visits VALUES (NULL, ?, ?, ?, ?, ?, ?)
-    """, (pid, did, symptoms, specialty, score,
-          datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    cur.execute("INSERT INTO visits VALUES (NULL, ?, ?, ?, ?, ?, ?)",
+                (pid, did, symptoms, specialty, score,
+                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
     vid = cur.lastrowid
     conn.close()
@@ -187,53 +182,25 @@ def insert_visit(pid, did, symptoms, specialty, score):
 def insert_appointment(pid, did, d, t, notes):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO appointments VALUES (NULL, ?, ?, ?, ?, ?, 'Scheduled')
-    """, (pid, did, str(d), str(t), notes))
+    cur.execute("INSERT INTO appointments VALUES (NULL, ?, ?, ?, ?, ?, 'Scheduled')",
+                (pid, did, str(d), str(t), notes))
     conn.commit()
     conn.close()
 
 def insert_feedback(vid, did, pid, rating, comments):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO feedback VALUES (NULL, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    """, (vid, did, pid, rating, comments))
+    cur.execute("INSERT INTO feedback VALUES (NULL, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                (vid, did, pid, rating, comments))
     conn.commit()
     conn.close()
 
 # -----------------------
-# PDF Generator
-# -----------------------
-def generate_pdf(patient, doctor, symptoms, specialty):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, "MedIntel Medical Report", ln=True, align="C")
-    pdf.ln(8)
-
-    pdf.set_font("Arial", "", 12)
-    for k, v in patient.items():
-        pdf.multi_cell(0, 7, f"{k.capitalize()}: {v}")
-
-    pdf.ln(4)
-    pdf.multi_cell(0, 7, f"Symptoms: {symptoms}")
-    pdf.multi_cell(0, 7, f"Predicted Specialty: {specialty}")
-    pdf.ln(4)
-
-    pdf.multi_cell(0, 7, f"Doctor: {doctor['name']}")
-    pdf.multi_cell(0, 7, f"Specialty: {doctor['specialty']}")
-    pdf.multi_cell(0, 7, f"Experience: {doctor['experience']} years")
-    pdf.multi_cell(0, 7, f"Rating: {doctor['rating']}")
-
-    return pdf.output(dest="S").encode("latin-1")
-
-# -----------------------
 # Session State
 # -----------------------
+st.session_state.setdefault("patient_id", None)
 st.session_state.setdefault("pdf", None)
 st.session_state.setdefault("pdf_name", None)
-st.session_state.setdefault("patient_id", None)
 
 # -----------------------
 # Patient Portal
@@ -250,12 +217,11 @@ with st.form("patient_form"):
     submit = st.form_submit_button("Find Doctors")
 
 # -----------------------
-# Doctor Matching + Booking
+# Doctor Matching + Booking (FIXED)
 # -----------------------
 if submit and not doctors_df.empty:
     conn = get_conn()
-    dfp = pd.read_sql_query(
-        "SELECT * FROM patients WHERE name = ?", conn, params=(name,))
+    dfp = pd.read_sql_query("SELECT * FROM patients WHERE name = ?", conn, params=(name,))
     conn.close()
 
     pid = insert_patient(name, age, city, language) if dfp.empty else int(dfp.iloc[0]["id"])
@@ -264,11 +230,7 @@ if submit and not doctors_df.empty:
     specialty = detect_specialty(symptoms)
     st.success(f"Detected Specialty: {specialty}")
 
-    query_emb = MODEL.encode(
-        f"{specialty} {city} {language} {symptoms}".lower(),
-        convert_to_tensor=True
-    )
-
+    query_emb = MODEL.encode(f"{specialty} {city} {language} {symptoms}".lower(), convert_to_tensor=True)
     scores = util.cos_sim(query_emb, doctor_embeddings)[0].cpu().numpy()
 
     results = []
@@ -285,40 +247,29 @@ if submit and not doctors_df.empty:
         visit_id = insert_visit(pid, r["id"], symptoms, specialty, r["score"])
 
         with st.expander("📅 Book Appointment"):
-            d = st.date_input("Date", min_value=date.today(), key=f"d{r['id']}")
-            t = st.time_input("Time", key=f"t{r['id']}")
-            notes = st.text_area(
-                "Notes",
-                "Experiencing headache, fever and dry cough for the past few days.",
-                key=f"n{r['id']}"
-            )
-            if st.button("Confirm Appointment", key=f"b{r['id']}"):
-                insert_appointment(pid, r["id"], d, t, notes)
-                st.success("✅ Appointment Booked")
+            with st.form(f"appointment_form_{r['id']}"):
+                d = st.date_input("Date", min_value=date.today())
+                t = st.time_input("Time")
+                notes = st.text_area(
+                    "Notes",
+                    "Experiencing headache, fever and dry cough for the past few days."
+                )
+                confirm = st.form_submit_button("✅ Confirm Appointment")
+
+                if confirm:
+                    insert_appointment(pid, r["id"], d, t, notes)
+                    st.success("✅ Appointment Booked Successfully!")
+                    st.toast("Appointment confirmed 🩺")
 
         with st.expander("⭐ Give Feedback"):
-            rating = st.slider("Rating", 1, 5, 4, key=f"r{r['id']}")
-            comment = st.text_area("Comment", key=f"c{r['id']}")
-            if st.button("Submit Feedback", key=f"f{r['id']}"):
-                insert_feedback(visit_id, r["id"], pid, rating, comment)
-                st.success("Feedback Submitted")
+            with st.form(f"feedback_form_{r['id']}"):
+                rating = st.slider("Rating", 1, 5, 4)
+                comment = st.text_area("Comment")
+                fb = st.form_submit_button("Submit Feedback")
 
-    st.session_state.pdf = generate_pdf(
-        {"name": name, "age": age, "city": city, "language": language},
-        results[0], symptoms, specialty
-    )
-    st.session_state.pdf_name = f"Medical_Report_{name}.pdf"
-
-# -----------------------
-# Download PDF
-# -----------------------
-if st.session_state.pdf:
-    st.download_button(
-        "📄 Download Medical Report",
-        st.session_state.pdf,
-        file_name=st.session_state.pdf_name,
-        mime="application/pdf"
-    )
+                if fb:
+                    insert_feedback(visit_id, r["id"], pid, rating, comment)
+                    st.success("Feedback Submitted")
 
 # -----------------------
 # My Appointments
