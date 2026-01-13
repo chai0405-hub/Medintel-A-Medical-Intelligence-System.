@@ -6,6 +6,22 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 
+import sqlite3
+
+conn = sqlite3.connect("medintel.db")
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS patients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE,
+    password TEXT
+)
+""")
+
+conn.commit()
+conn.close()
+ 
 # ---- TEMP DEBUG CODE (add here) ----
 conn = sqlite3.connect("medintel.db")
 cursor = conn.cursor()
