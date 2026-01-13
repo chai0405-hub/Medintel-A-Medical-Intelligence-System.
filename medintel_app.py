@@ -2,11 +2,19 @@
 # ==========================================================
 # MedIntel – Fully Integrated Medical Intelligence System
 # ==========================================================
-
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
 import sqlite3
+
+# ---- TEMP DEBUG CODE (add here) ----
+conn = sqlite3.connect("medintel.db")
+cursor = conn.cursor()
+cursor.execute("PRAGMA table_info(patients)")
+print(cursor.fetchall())
+conn.close()
+# ---- END DEBUG CODE ----
+
+from datetime import datetime, timedelta
 from plyer import notification
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
