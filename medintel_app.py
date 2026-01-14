@@ -40,22 +40,16 @@ def init_db():
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   name TEXT, specialty TEXT, city TEXT, languages TEXT, experience INTEGER, rating REAL, password TEXT,email TEXT)''')
     # Records
-    c.execute('''CREATE TABLE IF NOT EXISTS records
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  patient_id INTEGER,
-                  visit_number INTEGER,
-                  symptoms TEXT,
-                  severity INTEGER,
-                  heart_rate INTEGER,
-                  sugar INTEGER,
-                  bp TEXT,
-                  steps INTEGER,
-                  risk TEXT,
-                  risk_score INTEGER,
-                  specialty_risk TEXT,
-                  date TEXT,
-                  notes TEXT,
-                  FOREIGN KEY(patient_id) REFERENCES patients(id))''')
+   c.execute('''CREATE TABLE IF NOT EXISTS doctors
+             (id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT,
+              specialty TEXT,
+              city TEXT,
+              languages TEXT,
+              experience INTEGER,
+              rating REAL,
+              password TEXT,
+              email TEXT)''')
     # Medication
     c.execute('''CREATE TABLE IF NOT EXISTS medication
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
