@@ -114,11 +114,7 @@ login_btn = st.sidebar.button("Proceed")
 
 if login_btn and username_input and password_input:
     if role_input == "Patient":
-      row = pd.read_sql(
-    "SELECT * FROM patients WHERE name=? AND password=?",
-    conn,
-    params=(username_input, password_input)
-)
+        row = pd.read_sql("SELECT * FROM patients WHERE name=? AND password=?", conn, params=(username_input, password_input))
         if auth_choice == "Register":
             if row.empty:
                 c.execute("INSERT INTO patients (name, age, city, language, password) VALUES (?,?,?,?,?)",
