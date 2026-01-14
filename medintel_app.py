@@ -40,7 +40,7 @@ def init_db():
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   name TEXT, specialty TEXT, city TEXT, languages TEXT, experience INTEGER, rating REAL, password TEXT,email TEXT)''')
     # Records
-   c.execute('''CREATE TABLE IF NOT EXISTS doctors
+   c.execute('''CREATE TABLE IF NOT EXISTS doctors,
              (id INTEGER PRIMARY KEY AUTOINCREMENT,
               name TEXT,
               specialty TEXT,
