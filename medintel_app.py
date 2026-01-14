@@ -31,96 +31,63 @@ DB_FILE = "medintel.db"
 def init_db():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()
+    # Patients
+    c.execute('''CREATE TABLE IF NOT EXISTS patients
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT, age INTEGER, city TEXT, language TEXT, password TEXT)''')
+    # Doctors
+    c.execute('''CREATE TABLE IF NOT EXISTS doctors
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT, specialty TEXT, city TEXT, languages TEXT, experience INTEGER, rating REAL, password TEXT,email TEXT)''')
+    # Records
+    c.execute('''CREATE TABLE IF NOT EXISTS records
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  patient_id INTEGER,
+                  visit_number INTEGER,
+                  symptoms TEXT,
+                  severity INTEGER,
+                  heart_rate INTEGER,
+                  sugar INTEGER,
+                  bp TEXT,
+                  steps INTEGER,
+                  risk TEXT,
+                  risk_score INTEGER,
+                  specialty_risk TEXT,
+                  date TEXT,
+                  notes TEXT,
+                  FOREIGN KEY(patient_id) REFERENCES patients(id))''')
+    # Medication
+    c.execute('''CREATE TABLE IF NOT EXISTS medication
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  patient_id INTEGER,
+                  medicine_name TEXT,
+                  time TEXT,
+                  taken INTEGER,
+                  date TEXT,                 
+                  confirmation TEXT,
+                  FOREIGN KEY(patient_id) REFERENCES patients(id))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS emergency
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 patient_id TEXT,
+                 risk TEXT,
+                 heart_rate INTEGER,
+                 sugar INTEGER,
+                 bp TEXT,
+                 message TEXT,
+                 date TEXT,
+                 FOREIGN KEY(patient_id) REFERENCES patients(id))''')
+     
 
-    # ---------------- PATIENTS ----------------
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS patients (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE,
-            age INTEGER,
-            city TEXT,
-            language TEXT,
-            password TEXT
-        )
-    ''')
-
-    # ---------------- DOCTORS ----------------
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS doctors (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            specialty TEXT,
-            city TEXT,
-            languages TEXT,
-            experience INTEGER,
-            rating REAL,
-            password TEXT,
-            email TEXT
-        )
-    ''')
-
-    # ---------------- RECORDS (FIXED & REQUIRED) ----------------
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            patient_id INTEGER,
-            visit_number INTEGER,
-            symptoms TEXT,
-            severity INTEGER,
-            heart_rate INTEGER,
-            sugar INTEGER,
-            bp TEXT,
-            steps INTEGER,
-            risk TEXT,
-            risk_score INTEGER,
-            specialty_risk TEXT,
-            date TEXT,
-            notes TEXT,
-            FOREIGN KEY(patient_id) REFERENCES patients(id)
-        )
-    ''')
-
-    # ---------------- MEDICATION ----------------
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS medication (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            patient_id INTEGER,
-            medicine_name TEXT,
-            time TEXT,
-            taken INTEGER,
-            date TEXT,
-            confirmation TEXT,
-            FOREIGN KEY(patient_id) REFERENCES patients(id)
-        )
-    ''')
-
-    # ---------------- EMERGENCY ----------------
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS emergency (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            patient_id INTEGER,
-            risk TEXT,
-            heart_rate INTEGER,
-            sugar INTEGER,
-            bp TEXT,
-            message TEXT,
-            date TEXT,
-            FOREIGN KEY(patient_id) REFERENCES patients(id)
-        )
-    ''')
-
-    # ---------------- CHAT ----------------
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS chat (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            patient_id INTEGER,
-            sender TEXT,
-            message TEXT,
-            timestamp TEXT,
-            FOREIGN KEY(patient_id) REFERENCES patients(id)
-        )
-    ''')
-
+    c.execute(''' CREATE TABLE IF NOT EXISTS chat 
+                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  patient_id INTEGER,
+                  sender TEXT,
+                  message TEXT,
+                  timestamp TEXT
+                  )
+         ''')
+    
+   
     conn.commit()
     return conn, c
 
@@ -147,7 +114,11 @@ login_btn = st.sidebar.button("Proceed")
 
 if login_btn and username_input and password_input:
     if role_input == "Patient":
-        row = pd.read_sql("SELECT * FROM patients WHERE name=? AND password=?", conn, params=(username_input, password_input))
+      row = pd.read_sql(
+    "SELECT * FROM patients WHERE name=? AND password=?",
+    conn,
+    params=(username_input, password_input)
+)
         if auth_choice == "Register":
             if row.empty:
                 c.execute("INSERT INTO patients (name, age, city, language, password) VALUES (?,?,?,?,?)",
